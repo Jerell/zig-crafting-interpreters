@@ -1,10 +1,14 @@
+// src/root.zig
 const std = @import("std");
-const testing = std.testing;
 
-export fn add(a: i32, b: i32) i32 {
-    return a + b;
-}
+pub usingnamespace @import("lox/token.zig");
+pub usingnamespace @import("lox/tokentype.zig");
+pub usingnamespace @import("lox/expressions.zig");
+pub usingnamespace @import("lox/scanner.zig");
+pub usingnamespace @import("lox/parser.zig");
+pub usingnamespace @import("lox/errors.zig");
 
-test "basic add functionality" {
-    try testing.expect(add(3, 7) == 10);
+test "placeholder library test" {
+    // This test belongs to the library artifact
+    try std.testing.expect(true);
 }
