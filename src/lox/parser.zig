@@ -48,23 +48,153 @@ pub const Parser = struct {
         return expr_ptr;
     }
 
-    // Placeholder for comparison - should also return !*ast.Expr
     fn comparison(self: *Parser) !*ast.Expr {
-        // TODO: Implement comparison parsing logic similar to equality
-        // It will call term() and handle <, <=, >, >= operators
-        // For now, let's return a dummy literal to make equality compile
-        const literal_node = try self.allocator.create(ast.Expr);
-        literal_node.* = ast.Expr{
-            .literal = ast.Literal{ .value = ast.LiteralValue.nil },
-        };
-        return literal_node;
-        // return error.ParseError; // Or return an error
+        var expr_ptr = try self.term();
+
+        while (self.match(&.{
+            TokenType.GREATER,
+            TokenType.GREATER_EQUAL,
+            TokenType.LESS,
+            TokenType.LESS_EQUAL,
+        })) {
+            const operator_token = self.previous();
+            const right_ptr = try self.term();
+            errdefer self.allocator.destroy(right_ptr);
+
+            const new_binary_expr_ptr = try self.allocator.create(ast.Expr);
+
+            new_binary_expr_ptr.* = ast.Expr{
+                .binary = ast.Binary{
+                    .left = expr_ptr,
+                    .operator = operator_token,
+                    .right = right_ptr,
+                },
+            };
+            expr_ptr = new_binary_expr_ptr;
+        }
+        return expr_ptr;
+    }
+
+    fn term(self: *Parser) !*ast.Expr {
+        var expr_ptr = try self.factor();
+
+        while (self.match(&.{ TokenType.MINUS, TokenType.PLUS })) {
+            const operator_token = self.previous();
+            const right_ptr = try self.factor();
+            errdefer self.allocator.destroy(right_ptr);
+
+            const new_binary_expr_ptr = try self.allocator.create(ast.Expr);
+
+            new_binary_expr_ptr.* = ast.Expr{
+                .binary = ast.Binary{
+                    .left = expr_ptr,
+                    .operator = operator_token,
+                    .right = right_ptr,
+                },
+            };
+            expr_ptr = new_binary_expr_ptr;
+        }
+        return expr_ptr;
+    }
+
+    fn factor(self: *Parser) !*ast.Expr {
+        var expr_ptr = try self.unary();
+
+        while (self.match(&.{ TokenType.SLASH, TokenType.STAR })) {
+            const operator_token = self.previous();
+            const right_ptr = try self.unary();
+            errdefer self.allocator.destroy(right_ptr);
+
+            const new_binary_expr_ptr = try self.allocator.create(ast.Expr);
+
+            new_binary_expr_ptr.* = ast.Expr{
+                .binary = ast.Binary{
+                    .left = expr_ptr,
+                    .operator = operator_token,
+                    .right = right_ptr,
+                },
+            };
+            expr_ptr = new_binary_expr_ptr;
+        }
+    }
+
+    fn unary(self: *Parser) !*ast.Expr {
+        if (self.match(&.{ TokenType.BANG, TokenType.MINUS })) {
+            const operator_token = self.previous();
+            const right_ptr = try self.unary();
+
+            const new_unary_expr_ptr = try self.allocator.create(ast.Expr);
+
+            new_unary_expr_ptr.* = ast.Expr{
+                .unary = ast.Unary{
+                    .operator = operator_token,
+                    .right = right_ptr,
+                },
+            };
+            return new_unary_expr_ptr;
+        }
+        return self.primary();
+    }
+
+    fn primary(self: *Parser) !*ast.Expr {
+        const new_primary_expr_ptr = try self.allocator.create(ast.Expr);
+
+        if (self.match(&.{TokenType.FALSE})) {
+            new_primary_expr_ptr.* = ast.Expr{
+                .literal = ast.Literal{
+                    .value = ast.LiteralValue{ .boolean = false },
+                },
+            };
+        }
+
+        if (self.match(&.{TokenType.TRUE})) {
+            new_primary_expr_ptr.* = ast.Expr{
+                .literal = ast.Literal{
+                    .value = ast.LiteralValue{ .boolean = true },
+                },
+            };
+        }
+
+        if (self.match(&.{TokenType.NIL})) {
+            new_primary_expr_ptr.* = ast.Expr{
+                .literal = ast.Literal{
+                    .value = ast.LiteralValue.nil,
+                },
+            };
+        }
+
+        if (self.match(&.{TokenType.NUMBER})) {
+            new_primary_expr_ptr.* = ast.Expr{
+                .literal = ast.Literal{
+                    .value = ast.LiteralValue{
+                        .number = self.previous().literal,
+                    },
+                },
+            };
+        }
+
+        if (self.match(&.{TokenType.STRING})) {
+            new_primary_expr_ptr.* = ast.Expr{
+                .literal = ast.Literal{
+                    .value = ast.LiteralValue{
+                        .string = self.previous().literal,
+                    },
+                },
+            };
+        }
+
+        if (self.match(&.{TokenType.LEFT_PAREN})) {
+            new_primary_expr_ptr.* = self.expression();
+            self.consume(TokenType.RIGHT_PAREN, "Expect ')' after expression.");
+        }
+
+        return new_primary_expr_ptr;
     }
 
     fn match(self: *Parser, types: []const TokenType) bool {
         for (types) |ttype| {
             if (self.check(ttype)) {
-                _ = self.advance(); // Consume the token
+                _ = self.advance();
                 return true;
             }
         }
