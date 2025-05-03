@@ -235,20 +235,22 @@ pub const Parser = struct {
 
     fn reportParseError(self: *Parser, token: Token, message: []const u8) ParseError {
         self.hadError = true;
-        errors.reportTokenError(token, message);
+        reportTokenError(token, message);
         return ParseError.ExpectedToken;
     }
 };
 
-pub fn reportTokenError(token: Token, message: []const u8) void {
+pub fn reportTokenError(
+    allocator: std.mem.Allocator,
+    token: Token,
+    message: []const u8,
+) void {
     if (token.token_type == .EOF) {
         errors.reportError(token.line, " at end", message);
     } else {
-        // This might require allocation if you want the lexeme in the message.
-        // Keep it simple for now, or pass an allocator if needed.
-        // const msg_prefix = std.fmt.allocPrint(allocator, " at '{s}'", .{token.lexeme}) catch " at token";
-        // defer allocator.free(msg_prefix); // If allocated
-        errors.reportError(token.line, " near token", message); // Simplified
+        const msg_prefix = std.fmt.allocPrint(allocator, " at '{s}'", .{token.lexeme}) catch " at token";
+        defer allocator.free(msg_prefix); // If allocated
+        errors.reportError(token.line, msg_prefix, message);
     }
 }
 
