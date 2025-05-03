@@ -21,10 +21,6 @@ pub const Scanner = struct {
         };
     }
 
-    pub fn deinit(self: *Scanner) void {
-        self.tokens.deinit();
-    }
-
     pub fn scanTokens(self: *Scanner) ![]Token {
         while (!self.isAtEnd()) {
             self.start = self.current;

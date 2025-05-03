@@ -1,6 +1,5 @@
-// src/main.zig
 const std = @import("std");
-const lox = @import("lox"); // Import the "lox" module defined in build.zig
+const lox = @import("lox");
 
 pub fn main() !void {
     // Use an ArenaAllocator for the entire process (parsing, AST, etc.)
@@ -83,49 +82,41 @@ fn runPrompt(allocator: std.mem.Allocator) !void {
 // Executes a block of Lox source code.
 // Returns true if a Lox runtime/syntax error occurred.
 fn run(allocator: std.mem.Allocator, source: []const u8) !bool {
-    _ = allocator;
-    _ = source;
-    // 1. Scan
-    // Scanner doesn't allocate nodes, just the token list.
-    // We can use a temporary allocator or the main arena. Arena is fine.
-    // var scanner = try lox.Scanner.init(allocator, source);
-    // Scanner owns the ArrayList, needs deinit if not using Arena for tokens
-    // If Scanner uses the passed allocator (arena), deferring deinit might double-free.
-    // Let's assume Scanner *copies* tokens or uses the passed allocator correctly.
-    // If Scanner uses the passed allocator for its list, no deinit needed with Arena.
-    // Let's modify Scanner.init to just use the allocator, and remove its deinit.
-    // **Action Required: Modify Scanner.init to use allocator, remove Scanner.deinit**
-    // (Or keep Scanner.deinit and use a separate allocator for it)
+    var scanner = try lox.Scanner.init(allocator, source);
+    const tokens = try scanner.scanTokens();
 
-    // const tokens = try scanner.scanTokens(); // Returns []Token slice
+    var parser = lox.Parser.init(allocator, tokens);
 
-    // 2. Parse
-    // var parser = lox.Parser.init(allocator, tokens); // Pass the arena allocator
-    // Parser itself doesn't need deinit if it just borrows tokens and uses
-    // the passed allocator for the AST.
+    const maybe_ast_root = parser.parse();
 
-    // const statements = parser.parse() catch |err| {
-    //     // Handle fundamental parsing errors (e.g., allocation failed in parser)
-    //     // These are different from Lox syntax errors reported via parser.hadError
-    //     std.debug.print("Internal Parser Error: {any}\n", .{err});
-    //     return true; // Indicate an error occurred
-    // };
-    // // Arena will free the 'statements' slice and all AST nodes automatically.
-    //
-    // // Check for Lox syntax errors reported during parsing
-    // if (parser.hadError) {
-    //     return true; // Indicate syntax errors occurred
-    // }
-    //
-    // // 3. TODO: Interpret
-    // std.debug.print("Parsing successful. AST:\n", .{});
-    // // You'll need a way to print statements/expressions if you want to see the AST
-    // // For example:
-    // // for (statements) |stmt| {
-    // //    try lox.printAst(stmt, std.io.getStdOut().writer()); // Assuming you add printAst
-    // //    try std.io.getStdOut().writer().writeAll("\n");
-    // // }
-    // _ = statements; // Keep statements alive until end of scope for Arena
-    //
-    return false; // No Lox errors occurred
+    if (maybe_ast_root) |ast_root| {
+        // --- Success Case ---
+        // Parsing succeeded without syntax errors or internal errors caught by parse().
+        std.debug.print("Parsing successful. AST:\n", .{});
+
+        // 3. TODO: Interpret the AST
+        // You would pass ast_root to your interpreter here.
+
+        // Example: Print the AST using the print function from expressions.zig
+        // (Requires ast_root to be non-null, which the 'if' guarantees)
+        var writer = std.io.getStdOut().writer(); // Or any writer
+        try ast_root.print(writer);
+        try writer.print("\n", .{});
+
+        // Return false because no Lox errors occurred during parsing.
+        return false;
+    } else {
+        // --- Failure Case ---
+        // Parsing failed. This means either:
+        // 1. parser.hadError was true (syntax error reported).
+        // 2. An internal error occurred within parser.parse()'s catch block.
+        // The specific error message should have already been printed by
+        // reportParseError or the debug print inside parse's catch.
+
+        // Return true because a Lox error (syntax or internal parse) occurred.
+        return true;
+    }
+
+    // Note: The separate check for 'parser.hadError' after calling parse()
+    // is no longer necessary because parse() already returns null if hadError was true.
 }
