@@ -115,7 +115,7 @@ fn isEqual(left: LiteralValue, right: LiteralValue) bool {
     if (left == .nil and right == .nil) return true;
     if (left == .nil or right == .nil) return false;
 
-    if (@tagName(left) != @tagName(right)) return false;
+    if (!std.mem.eql(u8, @tagName(left), @tagName(right))) return false;
 
     return switch (left) {
         .number => |ln| right.number == ln,

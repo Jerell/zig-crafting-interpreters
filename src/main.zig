@@ -90,20 +90,10 @@ fn run(allocator: std.mem.Allocator, source: []const u8) !bool {
     const maybe_ast_root = parser.parse();
 
     if (maybe_ast_root) |ast_root| {
-        // --- Success Case ---
-        // Parsing succeeded without syntax errors or internal errors caught by parse().
-        std.debug.print("Parsing successful. AST:\n", .{});
+        var writer = std.io.getStdOut().writer();
+        const result = try ast_root.evaluate(allocator);
+        try writer.print("{}\n", .{result});
 
-        // 3. TODO: Interpret the AST
-        // You would pass ast_root to your interpreter here.
-
-        // Example: Print the AST using the print function from expressions.zig
-        // (Requires ast_root to be non-null, which the 'if' guarantees)
-        var writer = std.io.getStdOut().writer(); // Or any writer
-        try ast_root.print(writer);
-        try writer.print("\n", .{});
-
-        // Return false because no Lox errors occurred during parsing.
         return false;
     } else {
         // --- Failure Case ---
