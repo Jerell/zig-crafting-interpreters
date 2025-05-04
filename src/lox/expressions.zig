@@ -3,6 +3,14 @@ const io = std.io;
 const TokenType = @import("tokentype.zig").TokenType;
 const Token = @import("token.zig").Token;
 
+pub const RuntimeError = error{
+    InvalidOperands,
+    InvalidOperand,
+    DivisionByZero,
+    UnsupportedOperator,
+    OutOfMemory,
+};
+
 pub const Expr = union(enum) {
     binary: Binary,
     unary: Unary,
@@ -10,14 +18,14 @@ pub const Expr = union(enum) {
     grouping: Grouping,
     // variable: Variable,
 
-    // pub fn evaluate(self: *Expr, env: *Environment) !LiteralValue {
-    //     switch (self.*) {
-    //         .binary => |*binary| return binary.evaluate(env),
-    //         .unary => |*unary| return unary.evaluate(env),
-    //         .literal => |*literal| return literal.evaluate(env),
-    //         .grouping => |*grouping| return grouping.evaluate(env),
-    //     }
-    // }
+    pub fn evaluate(self: *Expr, allocator: std.mem.Allocator) RuntimeError!LiteralValue {
+        switch (self.*) {
+            .binary => |*binary| return binary.evaluate(allocator),
+            .unary => |*unary| return unary.evaluate(allocator),
+            .literal => |*literal| return literal.evaluate(allocator),
+            .grouping => |*grouping| return grouping.evaluate(allocator),
+        }
+    }
 
     pub fn print(self: Expr, writer: anytype) anyerror!void {
         switch (self) {
@@ -26,16 +34,6 @@ pub const Expr = union(enum) {
             .literal => |literal| return literal.print(writer),
             .grouping => |grouping| return grouping.print(writer),
             // .variable => |variable| return variable.print(writer),
-        }
-    }
-
-    pub fn deinit(self: *Expr, allocator: std.mem.Allocator) void {
-        switch (self.*) {
-            .binary => |*binary| binary.deinit(allocator),
-            .unary => |*unary| unary.deinit(allocator),
-            .literal => |*literal| literal.deinit(allocator),
-            .grouping => |*grouping| grouping.deinit(allocator),
-            // .variable => |*variable| variable.deinit(allocator),
         }
     }
 };
@@ -53,13 +51,79 @@ pub const Binary = struct {
         try writer.print(")", .{});
     }
 
-    pub fn deinit(self: *Binary, allocator: std.mem.Allocator) void {
-        self.left.deinit(allocator);
-        allocator.destroy(self.left);
-        self.right.deinit(allocator);
-        allocator.destroy(self.right);
+    pub fn evaluate(self: *Binary, allocator: std.mem.Allocator) RuntimeError!LiteralValue {
+        const left_val = try self.left.evaluate(allocator);
+        const right_val = try self.right.evaluate(allocator);
+
+        switch (self.operator.type) {
+            .MINUS => {
+                if (left_val != .number or right_val != .number) return RuntimeError.InvalidOperands;
+                return LiteralValue{ .number = left_val.number - right_val.number };
+            },
+            .SLASH => {
+                if (left_val != .number or right_val != .number) return RuntimeError.InvalidOperands;
+                if (right_val.number == 0) return RuntimeError.DivisionByZero;
+                return LiteralValue{ .number = left_val.number / right_val.number };
+            },
+            .STAR => {
+                if (left_val != .number or right_val != .number) return RuntimeError.InvalidOperands;
+                return LiteralValue{ .number = left_val.number * right_val.number };
+            },
+            .PLUS => {
+                return switch (left_val) {
+                    .number => |ln| switch (right_val) {
+                        .number => |rn| LiteralValue{ .number = ln + rn },
+                        else => RuntimeError.InvalidOperands,
+                    },
+                    .string => |ls| switch (right_val) {
+                        .string => |rs| {
+                            const new_str = try std.fmt.allocPrint(allocator, "{s}{s}", .{ ls, rs });
+                            return LiteralValue{ .string = new_str };
+                        },
+                        else => RuntimeError.InvalidOperands,
+                    },
+                    else => RuntimeError.InvalidOperands,
+                };
+            },
+            .GREATER, .GREATER_EQUAL, .LESS, .LESS_EQUAL => {
+                if (left_val != .number or right_val != .number) {
+                    return RuntimeError.InvalidOperands;
+                }
+                const comparison_result = switch (self.operator.type) {
+                    .GREATER => left_val.number > right_val.number,
+                    .GREATER_EQUAL => left_val.number >= right_val.number,
+                    .LESS => left_val.number < right_val.number,
+                    .LESS_EQUAL => left_val.number <= right_val.number,
+                    else => unreachable,
+                };
+                return LiteralValue{ .boolean = comparison_result };
+            },
+
+            .EQUAL_EQUAL => {
+                return LiteralValue{ .boolean = isEqual(left_val, right_val) };
+            },
+            .BANG_EQUAL => {
+                return LiteralValue{ .boolean = !isEqual(left_val, right_val) };
+            },
+
+            else => unreachable,
+        }
     }
 };
+
+fn isEqual(left: LiteralValue, right: LiteralValue) bool {
+    if (left == .nil and right == .nil) return true;
+    if (left == .nil or right == .nil) return false;
+
+    if (@tagName(left) != @tagName(right)) return false;
+
+    return switch (left) {
+        .number => |ln| right.number == ln,
+        .string => |ls| std.mem.eql(u8, ls, right.string),
+        .boolean => |lb| right.boolean == lb,
+        else => unreachable,
+    };
+}
 
 pub const Unary = struct {
     operator: Token,
@@ -71,9 +135,24 @@ pub const Unary = struct {
         try writer.print(")", .{});
     }
 
-    pub fn deinit(self: *Unary, allocator: std.mem.Allocator) void {
-        self.right.deinit(allocator);
-        allocator.destroy(self.right);
+    pub fn evaluate(self: *Unary, allocator: std.mem.Allocator) RuntimeError!LiteralValue {
+        const right_val = try self.right.evaluate(allocator);
+        switch (self.operator.type) {
+            .MINUS => {
+                if (right_val != .number) return RuntimeError.InvalidOperand;
+                return LiteralValue{ .number = -right_val.number };
+            },
+            .BANG => {
+                // Lox truthiness: false and nil are falsey, everything else is truthy
+                const is_truthy = switch (right_val) {
+                    .boolean => |b| b,
+                    .nil => false,
+                    else => true,
+                };
+                return LiteralValue{ .boolean = !is_truthy };
+            },
+            else => unreachable,
+        }
     }
 };
 
@@ -89,9 +168,9 @@ pub const Literal = struct {
         }
     }
 
-    pub fn deinit(self: *Literal, allocator: std.mem.Allocator) void {
-        _ = self;
+    pub fn evaluate(self: *Literal, allocator: std.mem.Allocator) RuntimeError!LiteralValue {
         _ = allocator;
+        return self.value;
     }
 };
 
@@ -111,9 +190,8 @@ pub const Grouping = struct {
         try writer.print(")", .{});
     }
 
-    pub fn deinit(self: *Grouping, allocator: std.mem.Allocator) void {
-        self.expression.deinit(allocator);
-        allocator.destroy(self.expression);
+    pub fn evaluate(self: *Grouping, allocator: std.mem.Allocator) RuntimeError!LiteralValue {
+        return self.expression.evaluate(allocator);
     }
 };
 
@@ -124,10 +202,6 @@ pub const Grouping = struct {
 //         try writer.print("{}", .{self.name.lexeme});
 //     }
 //
-//     pub fn deinit(self: *Variable, allocator: std.mem.Allocator) void {
-//         _ = self;
-//         _ = allocator;
-//     }
 // };
 
 test "AST Printer test" {
