@@ -44,15 +44,25 @@ fn runFile(allocator: std.mem.Allocator, path: []const u8) !bool {
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
 
-    // Read the entire file using the provided allocator
     const bytes = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
-    // Arena will free 'bytes' automatically when main returns
 
-    return run(allocator, bytes); // Return the error status from run
+    var interpreter = try lox.Interpreter.init(allocator);
+
+    interpreter.interpret(bytes) catch |err| {
+        // Handle fatal errors from interpret itself (rare?)
+        std.debug.print("Fatal Interpreter Error: {any}\n", .{err});
+        return true; // Indicate error
+    };
+
+    // Return interpreter.hadRuntimeError || interpreter.hadSyntaxError (if flags exist)
+    // For now, let's assume interpret handles reporting, main handles exit codes based on file vs repl
+    return false; // Placeholder - need better error propagation
 }
 
 // Runs the interactive prompt (REPL).
 fn runPrompt(allocator: std.mem.Allocator) !void {
+    var interpreter = try lox.Interpreter.init(allocator);
+
     const stdin = std.io.getStdIn().reader();
     const stdout = std.io.getStdOut().writer();
     var input_buffer = std.ArrayList(u8).init(allocator);
@@ -63,50 +73,12 @@ fn runPrompt(allocator: std.mem.Allocator) !void {
         // Read line into a dynamic buffer using the allocator
         try stdin.streamUntilDelimiter(input_buffer.writer(), '\n', null);
 
-        // Run the line, ignore return value (error reported inside run)
-        _ = run(allocator, input_buffer.items) catch |err| {
-            // Handle fatal errors during the execution of a single line
-            std.debug.print("Runtime error: {any}\n", .{err});
-            // Continue the REPL loop
+        interpreter.interpret(input_buffer.items) catch |err| {
+            // Handle fatal errors from interpret itself (rare?)
+            std.debug.print("Fatal Interpreter Error: {any}\n", .{err});
+            // Decide whether to break or continue REPL
         };
 
-        // Reset buffer for next line, but keep allocated memory
         input_buffer.clearRetainingCapacity();
-
-        // Reset the global error flag for the next line in REPL mode
-        // (This is still using the global flag, ideally run would return it)
-        // lox.errors.had_error = false; // If you keep the global flag
     }
-}
-
-// Executes a block of Lox source code.
-// Returns true if a Lox runtime/syntax error occurred.
-fn run(allocator: std.mem.Allocator, source: []const u8) !bool {
-    var scanner = try lox.Scanner.init(allocator, source);
-    const tokens = try scanner.scanTokens();
-
-    var parser = lox.Parser.init(allocator, tokens);
-
-    const maybe_ast_root = parser.parse();
-
-    if (maybe_ast_root) |ast_root| {
-        var writer = std.io.getStdOut().writer();
-        const result = try ast_root.evaluate(allocator);
-        try writer.print("{}\n", .{result});
-
-        return false;
-    } else {
-        // --- Failure Case ---
-        // Parsing failed. This means either:
-        // 1. parser.hadError was true (syntax error reported).
-        // 2. An internal error occurred within parser.parse()'s catch block.
-        // The specific error message should have already been printed by
-        // reportParseError or the debug print inside parse's catch.
-
-        // Return true because a Lox error (syntax or internal parse) occurred.
-        return true;
-    }
-
-    // Note: The separate check for 'parser.hadError' after calling parse()
-    // is no longer necessary because parse() already returns null if hadError was true.
 }
