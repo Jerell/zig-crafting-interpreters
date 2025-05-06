@@ -2,7 +2,8 @@ const std = @import("std");
 const assert = @import("std").debug.assert;
 const Token = @import("token.zig").Token;
 const TokenType = @import("tokentype.zig").TokenType;
-const ast = @import("expressions.zig");
+const ast_expr = @import("expressions.zig");
+const ast_stmt = @import("statements.zig");
 const errors = @import("errors.zig");
 
 pub const Parser = struct {
@@ -11,7 +12,7 @@ pub const Parser = struct {
     allocator: std.mem.Allocator,
     hadError: bool,
 
-    pub fn init(allocator: std.mem.Allocator, tokens: []Token) Parser {
+    pub fn init(allocator: std.mem.Allocator, tokens: []const Token) Parser {
         assert(tokens.len > 0 and tokens[tokens.len - 1].type == TokenType.EOF);
         return Parser{
             .tokens = tokens,
@@ -21,21 +22,21 @@ pub const Parser = struct {
         };
     }
 
-    fn expression(self: *Parser) (ParseError || error{OutOfMemory})!*ast.Expr {
+    fn expression(self: *Parser) ParseError!*ast_expr.Expr {
         return self.equality();
     }
 
-    fn equality(self: *Parser) (ParseError || error{OutOfMemory})!*ast.Expr {
+    fn equality(self: *Parser) ParseError!*ast_expr.Expr {
         var expr_ptr = try self.comparison();
 
         while (self.match(&.{ TokenType.BANG_EQUAL, TokenType.EQUAL_EQUAL })) {
             const operator_token = self.previous();
             const right_ptr = try self.comparison();
 
-            const new_binary_expr_ptr = try self.allocator.create(ast.Expr);
+            const new_binary_expr_ptr = try self.allocator.create(ast_expr.Expr);
 
-            new_binary_expr_ptr.* = ast.Expr{
-                .binary = ast.Binary{
+            new_binary_expr_ptr.* = ast_expr.Expr{
+                .binary = ast_expr.Binary{
                     .left = expr_ptr,
                     .operator = operator_token,
                     .right = right_ptr,
@@ -46,7 +47,7 @@ pub const Parser = struct {
         return expr_ptr;
     }
 
-    fn comparison(self: *Parser) (ParseError || error{OutOfMemory})!*ast.Expr {
+    fn comparison(self: *Parser) ParseError!*ast_expr.Expr {
         var expr_ptr = try self.term();
 
         while (self.match(&.{
@@ -58,10 +59,10 @@ pub const Parser = struct {
             const operator_token = self.previous();
             const right_ptr = try self.term();
 
-            const new_binary_expr_ptr = try self.allocator.create(ast.Expr);
+            const new_binary_expr_ptr = try self.allocator.create(ast_expr.Expr);
 
-            new_binary_expr_ptr.* = ast.Expr{
-                .binary = ast.Binary{
+            new_binary_expr_ptr.* = ast_expr.Expr{
+                .binary = ast_expr.Binary{
                     .left = expr_ptr,
                     .operator = operator_token,
                     .right = right_ptr,
@@ -72,17 +73,17 @@ pub const Parser = struct {
         return expr_ptr;
     }
 
-    fn term(self: *Parser) (ParseError || error{OutOfMemory})!*ast.Expr {
+    fn term(self: *Parser) ParseError!*ast_expr.Expr {
         var expr_ptr = try self.factor();
 
         while (self.match(&.{ TokenType.MINUS, TokenType.PLUS })) {
             const operator_token = self.previous();
             const right_ptr = try self.factor();
 
-            const new_binary_expr_ptr = try self.allocator.create(ast.Expr);
+            const new_binary_expr_ptr = try self.allocator.create(ast_expr.Expr);
 
-            new_binary_expr_ptr.* = ast.Expr{
-                .binary = ast.Binary{
+            new_binary_expr_ptr.* = ast_expr.Expr{
+                .binary = ast_expr.Binary{
                     .left = expr_ptr,
                     .operator = operator_token,
                     .right = right_ptr,
@@ -93,17 +94,17 @@ pub const Parser = struct {
         return expr_ptr;
     }
 
-    fn factor(self: *Parser) (ParseError || error{OutOfMemory})!*ast.Expr {
+    fn factor(self: *Parser) ParseError!*ast_expr.Expr {
         var expr_ptr = try self.unary();
 
         while (self.match(&.{ TokenType.SLASH, TokenType.STAR })) {
             const operator_token = self.previous();
             const right_ptr = try self.unary();
 
-            const new_binary_expr_ptr = try self.allocator.create(ast.Expr);
+            const new_binary_expr_ptr = try self.allocator.create(ast_expr.Expr);
 
-            new_binary_expr_ptr.* = ast.Expr{
-                .binary = ast.Binary{
+            new_binary_expr_ptr.* = ast_expr.Expr{
+                .binary = ast_expr.Binary{
                     .left = expr_ptr,
                     .operator = operator_token,
                     .right = right_ptr,
@@ -115,15 +116,15 @@ pub const Parser = struct {
         return expr_ptr;
     }
 
-    fn unary(self: *Parser) (ParseError || error{OutOfMemory})!*ast.Expr {
+    fn unary(self: *Parser) ParseError!*ast_expr.Expr {
         if (self.match(&.{ TokenType.BANG, TokenType.MINUS })) {
             const operator_token = self.previous();
             const right_ptr = try self.unary();
 
-            const new_unary_expr_ptr = try self.allocator.create(ast.Expr);
+            const new_unary_expr_ptr = try self.allocator.create(ast_expr.Expr);
 
-            new_unary_expr_ptr.* = ast.Expr{
-                .unary = ast.Unary{
+            new_unary_expr_ptr.* = ast_expr.Expr{
+                .unary = ast_expr.Unary{
                     .operator = operator_token,
                     .right = right_ptr,
                 },
@@ -133,27 +134,27 @@ pub const Parser = struct {
         return self.primary();
     }
 
-    fn primary(self: *Parser) (ParseError || error{OutOfMemory})!*ast.Expr {
+    fn primary(self: *Parser) ParseError!*ast_expr.Expr {
         if (self.match(&.{TokenType.FALSE})) {
-            const node_ptr = try self.allocator.create(ast.Expr);
-            node_ptr.* = ast.Expr{
-                .literal = ast.Literal{ .value = ast.LiteralValue{ .boolean = false } },
+            const node_ptr = try self.allocator.create(ast_expr.Expr);
+            node_ptr.* = ast_expr.Expr{
+                .literal = ast_expr.Literal{ .value = ast_expr.LiteralValue{ .boolean = false } },
             };
             return node_ptr;
         }
 
         if (self.match(&.{TokenType.TRUE})) {
-            const node_ptr = try self.allocator.create(ast.Expr);
-            node_ptr.* = ast.Expr{
-                .literal = ast.Literal{ .value = ast.LiteralValue{ .boolean = true } },
+            const node_ptr = try self.allocator.create(ast_expr.Expr);
+            node_ptr.* = ast_expr.Expr{
+                .literal = ast_expr.Literal{ .value = ast_expr.LiteralValue{ .boolean = true } },
             };
             return node_ptr;
         }
 
         if (self.match(&.{TokenType.NIL})) {
-            const node_ptr = try self.allocator.create(ast.Expr);
-            node_ptr.* = ast.Expr{
-                .literal = ast.Literal{ .value = ast.LiteralValue.nil },
+            const node_ptr = try self.allocator.create(ast_expr.Expr);
+            node_ptr.* = ast_expr.Expr{
+                .literal = ast_expr.Literal{ .value = ast_expr.LiteralValue.nil },
             };
             return node_ptr;
         }
@@ -161,9 +162,9 @@ pub const Parser = struct {
         if (self.match(&.{TokenType.NUMBER})) {
             const literal_value = self.previous().literal.?;
             std.debug.assert(literal_value == .number);
-            const node_ptr = try self.allocator.create(ast.Expr);
-            node_ptr.* = ast.Expr{
-                .literal = ast.Literal{ .value = ast.LiteralValue{ .number = literal_value.number } },
+            const node_ptr = try self.allocator.create(ast_expr.Expr);
+            node_ptr.* = ast_expr.Expr{
+                .literal = ast_expr.Literal{ .value = ast_expr.LiteralValue{ .number = literal_value.number } },
             };
             return node_ptr;
         }
@@ -171,9 +172,9 @@ pub const Parser = struct {
         if (self.match(&.{TokenType.STRING})) {
             const literal_value = self.previous().literal.?;
             std.debug.assert(literal_value == .string);
-            const node_ptr = try self.allocator.create(ast.Expr);
-            node_ptr.* = ast.Expr{
-                .literal = ast.Literal{ .value = ast.LiteralValue{ .string = literal_value.string } },
+            const node_ptr = try self.allocator.create(ast_expr.Expr);
+            node_ptr.* = ast_expr.Expr{
+                .literal = ast_expr.Literal{ .value = ast_expr.LiteralValue{ .string = literal_value.string } },
             };
             return node_ptr;
         }
@@ -182,9 +183,9 @@ pub const Parser = struct {
             const inner_expr = try self.expression();
             _ = try self.consume(TokenType.RIGHT_PAREN, "Expect ')' after expression.");
 
-            const grouping_node_ptr = try self.allocator.create(ast.Expr);
-            grouping_node_ptr.* = ast.Expr{
-                .grouping = ast.Grouping{ .expression = inner_expr },
+            const grouping_node_ptr = try self.allocator.create(ast_expr.Expr);
+            grouping_node_ptr.* = ast_expr.Expr{
+                .grouping = ast_expr.Grouping{ .expression = inner_expr },
             };
             return grouping_node_ptr;
         }
@@ -255,16 +256,93 @@ pub const Parser = struct {
         }
     }
 
-    pub fn parse(self: *Parser) ?*ast.Expr {
-        const expr = self.expression() catch {
-            // If expression() propagates an error (e.g. ExpectedExpression from primary)
-            // self.hadError should already be true via reportParseError.
-            // Return null to indicate failure.
+    pub fn parse(self: *Parser) ?[]*ast_stmt.Stmt {
+        const statements = std.ArrayList(*ast_stmt.Stmt).init(self.allocator);
+
+        while (!self.isAtEnd()) {
+            // In Chapter 8, we start with simple statements.
+            // Later, this will be self.declaration()
+            const stmt_ptr = self.statement() catch |err| {
+                // If statement() returns an error (e.g., ParseError or OutOfMemory)
+                // We've already reported syntax errors via self.reportParseError
+                // or the error is an allocation error.
+                std.debug.print("Error parsing statement: {any}\n", .{err});
+                self.synchronize(); // Attempt to recover
+                // Continue to try parsing the next statement
+                continue;
+            };
+
+            // If statement() succeeded, try appending
+            // This 'try' handles potential allocation errors for the ArrayList itself,
+            // though with an Arena, this is less likely to be a separate failure point
+            // if the arena still has space.
+            statements.append(stmt_ptr) catch |oom_err| {
+                // Likely OutOfMemory if the ArrayList needs to reallocate
+                // and the arena is full.
+                self.hadError = true; // Mark that a critical error occurred
+                std.debug.print("Failed to append statement to list: {any}\n", .{oom_err});
+                // It's hard to recover from this gracefully without leaking the statement_ptr
+                // if not using an arena. With an arena, it's less of a leak concern.
+                // We might choose to stop parsing entirely here.
+                // For now, let's assume the arena handles it or we stop.
+                // If we want to free statement_ptr manually (if not arena):
+                // self.allocator.destroy(stmt_ptr);
+                return null; // Indicate overall parsing failure
+            };
+        }
+
+        // old
+        //
+
+        if (self.hadError) {
+            // If any syntax errors were reported, even if we collected some statements,
+            // consider the parse failed as a whole.
+            // The Arena will clean up statements_list and its contents.
+            return null;
+        }
+
+        // If no errors, return the collected statements.
+        // toOwnedSlice transfers ownership of the buffer if the ArrayList owned it.
+        // With an Arena, the buffer is owned by the Arena anyway.
+        return statements.toOwnedSlice() catch |oom_err| {
+            // Should be rare if append succeeded, but handle if toOwnedSlice itself could fail
+            self.hadError = true;
+            std.debug.print("Failed to finalize statement list: {any}\n", .{oom_err});
             return null;
         };
-        // Also return null if syntax errors were reported even if expression() returned something.
-        if (self.hadError) return null;
-        return expr;
+    }
+
+    fn statement(self: *Parser) ParseError!*ast_stmt.Stmt {
+        if (self.match(&.{TokenType.PRINT})) {
+            return self.printStatement();
+        }
+        return self.expressionStatement();
+    }
+
+    fn printStatement(self: *Parser) ParseError!*ast_stmt.Stmt {
+        const value = try self.expression();
+        _ = try self.consume(TokenType.SEMICOLON, "Expect ';' after print value.");
+
+        const stmt_node_ptr = try self.allocator.create(ast_stmt.Stmt);
+        stmt_node_ptr.* = ast_stmt.Stmt{
+            .print = ast_stmt.PrintStmt{
+                .expression = value,
+            },
+        };
+        return stmt_node_ptr;
+    }
+
+    fn expressionStatement(self: *Parser) ParseError!*ast_stmt.Stmt {
+        const expr = try self.expression();
+        _ = try self.consume(TokenType.SEMICOLON, "Expect ';' after print value.");
+
+        const stmt_node_ptr = try self.allocator.create(ast_stmt.Stmt);
+        stmt_node_ptr.* = ast_stmt.Stmt{
+            .expression = ast_stmt.ExpressionStmt{
+                .expression = expr,
+            },
+        };
+        return stmt_node_ptr;
     }
 };
 
@@ -286,4 +364,5 @@ const ParseError = error{
     ExpectedToken,
     UnexpectedToken,
     ExpectedExpression,
+    OutOfMemory,
 };
