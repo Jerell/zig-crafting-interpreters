@@ -1,7 +1,8 @@
 const std = @import("std");
 const Scanner = @import("scanner.zig").Scanner;
 const Parser = @import("parser.zig").Parser;
-const ast = @import("expressions.zig");
+const ast_expr = @import("expressions.zig");
+const ast_stmt = @import("statements.zig");
 
 pub const Interpreter = struct {
     allocator: std.mem.Allocator,
@@ -12,32 +13,25 @@ pub const Interpreter = struct {
         };
     }
 
-    pub fn interpret(self: *Interpreter, source: []const u8) !void {
-        var scanner = try Scanner.init(self.allocator, source);
-        const tokens = try scanner.scanTokens();
-
-        var parser = Parser.init(self.allocator, tokens);
-        const maybe_ast_root = parser.parse();
-
-        if (parser.hadError) {
-            return;
-        }
-
-        if (maybe_ast_root) |ast_root| {
-            const result = ast_root.evaluate(self.allocator) catch |err| {
-                self.reportRuntimeError(err);
-                return;
+    pub fn interpret(
+        self: *Interpreter,
+        statements: []*ast_stmt.Stmt,
+        writer: anytype,
+    ) !void {
+        for (statements) |stmt_ptr| {
+            stmt_ptr.execute(self.allocator, writer) catch |runtime_err| {
+                self.reportRuntimeError(runtime_err, writer);
+                // For now, stop on the first runtime error.
+                // The book's Lox.runtimeError sets a flag and might not throw.
+                return; // Or return the error: return runtime_err;
             };
-            var writer = std.io.getStdOut().writer();
-            try writer.print("{any}\n", .{result});
-        } else {
-            // Handle null AST if necessary
         }
     }
 
-    fn reportRuntimeError(self: *Interpreter, err: anyerror) void {
-        // TODO: Implement runtime error reporting
-        _ = self;
-        std.debug.print("Runtime Error Placeholder: {any}\n", .{err});
+    fn reportRuntimeError(self: *Interpreter, err: anyerror, writer: anytype) void {
+        _ = self; // Mark unused for now
+        writer.print("Runtime Error: {any}\n", .{err}) catch |e| {
+            std.debug.print("Failed to write runtime error: {any}, Original error: {any}\n", .{ e, err });
+        };
     }
 };

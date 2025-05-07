@@ -39,27 +39,56 @@ pub fn main() !void {
     }
 }
 
-// Runs a script file. Returns true if a Lox runtime/syntax error occurred.
+/// Executes a block of Lox source code.
+/// Returns true if a Lox runtime/syntax error occurred.
+fn run(
+    allocator: std.mem.Allocator,
+    source: []const u8,
+    interpreter: *lox.Interpreter,
+    writer: anytype,
+) !bool {
+    var scanner = try lox.Scanner.init(allocator, source);
+    const tokens = try scanner.scanTokens();
+
+    var parser = lox.Parser.init(allocator, tokens);
+    const maybe_statements = parser.parse();
+
+    if (parser.hadError) {
+        // Syntax errors already reported by the parser
+        return true; // Indicate syntax error occurred
+    }
+
+    if (maybe_statements) |statements| {
+        interpreter.interpret(statements, writer) catch |err| {
+            // This catch is if interpret itself is fallible beyond what execute handles.
+            _ = err; // Error already reported by interpreter.reportRuntimeError
+            return true;
+        };
+        // After interpretation, you might check a flag on the interpreter
+        // if (interpreter.hadRuntimeError) return true;
+    } else {
+        // Parsing failed for a reason other than syntax errors (e.g. internal parser issue)
+        // or parseStatements() returns null on syntax error too.
+        // If parser.hadError is false here, it's an unexpected null from parser.
+        std.debug.print("Parsing completed, but no statements were generated (AST is null).\n", .{});
+    }
+
+    return false;
+}
+
+/// Runs a script file. Returns true if a Lox runtime/syntax error occurred.
 fn runFile(allocator: std.mem.Allocator, path: []const u8) !bool {
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
-
     const bytes = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
 
     var interpreter = try lox.Interpreter.init(allocator);
+    const stdout_writer = std.io.getStdOut().writer();
 
-    interpreter.interpret(bytes) catch |err| {
-        // Handle fatal errors from interpret itself (rare?)
-        std.debug.print("Fatal Interpreter Error: {any}\n", .{err});
-        return true; // Indicate error
-    };
-
-    // Return interpreter.hadRuntimeError || interpreter.hadSyntaxError (if flags exist)
-    // For now, let's assume interpret handles reporting, main handles exit codes based on file vs repl
-    return false; // Placeholder - need better error propagation
+    return run(allocator, bytes, &interpreter, stdout_writer);
 }
 
-// Runs the interactive prompt (REPL).
+/// Runs the interactive prompt (REPL).
 fn runPrompt(allocator: std.mem.Allocator) !void {
     var interpreter = try lox.Interpreter.init(allocator);
 
@@ -70,15 +99,18 @@ fn runPrompt(allocator: std.mem.Allocator) !void {
 
     while (true) {
         try stdout.writeAll("> ");
-        // Read line into a dynamic buffer using the allocator
+        input_buffer.clearRetainingCapacity();
         try stdin.streamUntilDelimiter(input_buffer.writer(), '\n', null);
 
-        interpreter.interpret(input_buffer.items) catch |err| {
-            // Handle fatal errors from interpret itself (rare?)
-            std.debug.print("Fatal Interpreter Error: {any}\n", .{err});
-            // Decide whether to break or continue REPL
+        const had_line_error = run(allocator, input_buffer.items, &interpreter, stdout) catch |err| blk: {
+            // This catch handles errors from scanning/parsing within run()
+            std.debug.print("Error processing line: {any}\n", .{err});
+            break :blk true;
         };
 
-        input_buffer.clearRetainingCapacity();
+        if (had_line_error) {
+            // Error was already reported by parser or interpreter
+            // For REPL, we just continue to the next line.
+        }
     }
 }

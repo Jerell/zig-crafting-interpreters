@@ -242,7 +242,7 @@ pub const Parser = struct {
     }
 
     fn synchronize(self: *Parser) void {
-        self.advance();
+        _ = self.advance();
 
         while (!self.isAtEnd()) {
             if (self.previous().type == TokenType.SEMICOLON) {
@@ -250,14 +250,15 @@ pub const Parser = struct {
             }
             switch (self.peek().type) {
                 TokenType.CLASS, TokenType.FUN, TokenType.VAR, TokenType.FOR, TokenType.IF, TokenType.WHILE, TokenType.PRINT, TokenType.RETURN => return,
+                else => {},
             }
 
-            self.advance();
+            _ = self.advance();
         }
     }
 
     pub fn parse(self: *Parser) ?[]*ast_stmt.Stmt {
-        const statements = std.ArrayList(*ast_stmt.Stmt).init(self.allocator);
+        var statements = std.ArrayList(*ast_stmt.Stmt).init(self.allocator);
 
         while (!self.isAtEnd()) {
             // In Chapter 8, we start with simple statements.
@@ -290,9 +291,6 @@ pub const Parser = struct {
                 return null; // Indicate overall parsing failure
             };
         }
-
-        // old
-        //
 
         if (self.hadError) {
             // If any syntax errors were reported, even if we collected some statements,
@@ -334,7 +332,7 @@ pub const Parser = struct {
 
     fn expressionStatement(self: *Parser) ParseError!*ast_stmt.Stmt {
         const expr = try self.expression();
-        _ = try self.consume(TokenType.SEMICOLON, "Expect ';' after print value.");
+        _ = try self.consume(TokenType.SEMICOLON, "Expect ';' after expression");
 
         const stmt_node_ptr = try self.allocator.create(ast_stmt.Stmt);
         stmt_node_ptr.* = ast_stmt.Stmt{
