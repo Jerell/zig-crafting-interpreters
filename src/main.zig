@@ -2,14 +2,11 @@ const std = @import("std");
 const lox = @import("lox");
 
 pub fn main() !void {
-    // Use an ArenaAllocator for the entire process (parsing, AST, etc.)
-    // This simplifies cleanup significantly, especially on error paths.
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit(); // Frees all memory allocated by the arena at once
+    defer arena.deinit();
     const allocator = arena.allocator();
 
     const args = try std.process.argsAlloc(allocator);
-    // No need to free args individually, arena takes care of it
 
     var had_error: bool = false;
 
@@ -17,23 +14,18 @@ pub fn main() !void {
         std.debug.print("Usage: jlox [script]\n", .{});
         std.process.exit(64);
     } else if (args.len == 2) {
-        // Pass the arena allocator down
         had_error = runFile(allocator, args[1]) catch |err| {
-            // Handle file system or other fatal errors from runFile
             std.debug.print("Error running file: {any}\n", .{err});
-            std.process.exit(70); // Indicate internal software error
+            std.process.exit(70);
         };
     } else {
         // Pass the arena allocator down
         runPrompt(allocator) catch |err| {
-            // Handle fatal errors from runPrompt
             std.debug.print("Error running prompt: {any}\n", .{err});
             std.process.exit(70);
         };
-        // REPL errors are handled line-by-line, don't exit process
     }
 
-    // Exit with appropriate code if errors occurred during script execution
     if (had_error) {
         std.process.exit(65); // Indicate data format error (syntax error)
     }
