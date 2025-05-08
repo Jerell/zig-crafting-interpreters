@@ -261,49 +261,28 @@ pub const Parser = struct {
         var statements = std.ArrayList(*ast_stmt.Stmt).init(self.allocator);
 
         while (!self.isAtEnd()) {
-            // In Chapter 8, we start with simple statements.
-            // Later, this will be self.declaration()
-            const stmt_ptr = self.statement() catch |err| {
-                // If statement() returns an error (e.g., ParseError or OutOfMemory)
-                // We've already reported syntax errors via self.reportParseError
-                // or the error is an allocation error.
-                std.debug.print("Error parsing statement: {any}\n", .{err});
-                self.synchronize(); // Attempt to recover
-                // Continue to try parsing the next statement
+            const stmt_ptr = self.declaration() catch |err| {
+                if (err == error.OutOfMemory) {
+                    self.hadError = true;
+                    std.debug.print("Out of memory during parsing.\n", .{});
+                    return null;
+                }
+                self.synchronize();
                 continue;
             };
 
-            // If statement() succeeded, try appending
-            // This 'try' handles potential allocation errors for the ArrayList itself,
-            // though with an Arena, this is less likely to be a separate failure point
-            // if the arena still has space.
             statements.append(stmt_ptr) catch |oom_err| {
-                // Likely OutOfMemory if the ArrayList needs to reallocate
-                // and the arena is full.
-                self.hadError = true; // Mark that a critical error occurred
+                self.hadError = true;
                 std.debug.print("Failed to append statement to list: {any}\n", .{oom_err});
-                // It's hard to recover from this gracefully without leaking the statement_ptr
-                // if not using an arena. With an arena, it's less of a leak concern.
-                // We might choose to stop parsing entirely here.
-                // For now, let's assume the arena handles it or we stop.
-                // If we want to free statement_ptr manually (if not arena):
-                // self.allocator.destroy(stmt_ptr);
-                return null; // Indicate overall parsing failure
+                return null;
             };
         }
 
         if (self.hadError) {
-            // If any syntax errors were reported, even if we collected some statements,
-            // consider the parse failed as a whole.
-            // The Arena will clean up statements_list and its contents.
             return null;
         }
 
-        // If no errors, return the collected statements.
-        // toOwnedSlice transfers ownership of the buffer if the ArrayList owned it.
-        // With an Arena, the buffer is owned by the Arena anyway.
         return statements.toOwnedSlice() catch |oom_err| {
-            // Should be rare if append succeeded, but handle if toOwnedSlice itself could fail
             self.hadError = true;
             std.debug.print("Failed to finalize statement list: {any}\n", .{oom_err});
             return null;
@@ -319,7 +298,7 @@ pub const Parser = struct {
 
     fn printStatement(self: *Parser) ParseError!*ast_stmt.Stmt {
         const value = try self.expression();
-        _ = try self.consume(TokenType.SEMICOLON, "Expect ';' after print value.");
+        _ = try self.consume(TokenType.SEMICOLON, "Expect ';' after print value");
 
         const stmt_node_ptr = try self.allocator.create(ast_stmt.Stmt);
         stmt_node_ptr.* = ast_stmt.Stmt{
@@ -338,6 +317,33 @@ pub const Parser = struct {
         stmt_node_ptr.* = ast_stmt.Stmt{
             .expression = ast_stmt.ExpressionStmt{
                 .expression = expr,
+            },
+        };
+        return stmt_node_ptr;
+    }
+
+    fn declaration(self: *Parser) ParseError!*ast_stmt.Stmt {
+        if (self.match(&.{TokenType.VAR})) {
+            return self.varDeclaration();
+        }
+        return self.statement();
+    }
+
+    fn varDeclaration(self: *Parser) ParseError!*ast_stmt.Stmt {
+        const name_token = try self.consume(TokenType.IDENTIFIER, "Expect variable name");
+
+        var initializer: ?*ast_expr.Expr = null;
+        if (self.match(&.{TokenType.EQUAL})) {
+            initializer = try self.expression();
+        }
+
+        _ = try self.consume(TokenType.SEMICOLON, "Expect ';' after variable declaration");
+
+        const stmt_node_ptr = try self.allocator.create(ast_stmt.Stmt);
+        stmt_node_ptr.* = ast_stmt.Stmt{
+            .var_decl = ast_stmt.VarDeclStmt{
+                .name = name_token,
+                .initializer = initializer,
             },
         };
         return stmt_node_ptr;

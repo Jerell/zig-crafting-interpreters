@@ -195,14 +195,13 @@ pub const Grouping = struct {
     }
 };
 
-// pub const Variable = struct {
-//     name: Token,
-//
-//     pub fn print(self: Variable) anyerror!void {
-//         try writer.print("{}", .{self.name.lexeme});
-//     }
-//
-// };
+pub const Variable = struct {
+    name: Token,
+
+    pub fn print(self: Variable, writer: anytype) anyerror!void {
+        try writer.print("{}", .{self.name.lexeme});
+    }
+};
 
 test "AST Printer test" {
     // 1. Get an allocator (using GeneralPurposeAllocator for tests)
